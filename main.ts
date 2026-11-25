@@ -1,7 +1,7 @@
-// "The World in One Day - 25 November 2026"
-// make.fun news-image-20261125 - world atlas, gold on navy.
-// Pure Node stdlib (node:zlib, node:fs, node:path). No network, no clock,
-// no randomness, no external files. Deterministic: two runs are byte-identical.
+// The World in One Day — 25 November 2026
+// A gold-on-navy world atlas with eight news cards, rendered to PNG by a
+// hand-written encoder. Node 22, standard library only. No network, no
+// clock, no randomness: identical input always yields identical bytes.
 
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -10,26 +10,103 @@ import { join } from "node:path";
 const W = 1024;
 const H = 1024;
 
-// ---------------------------------------------------------------- palette
-type RGB = [number, number, number];
-const NAVY_TOP: RGB = [10, 20, 36];
-const NAVY_BOT: RGB = [16, 30, 52];
-const PANEL: RGB = [16, 32, 56];
-const PANEL_EDGE: RGB = [22, 44, 74];
-const GRATICULE: RGB = [38, 62, 96];
-const LAND: RGB = [201, 162, 39];
-const LAND_EDGE: RGB = [160, 126, 28];
-const CREAM: RGB = [242, 234, 216];
-const GOLD: RGB = [232, 184, 64];
-const MUTED: RGB = [168, 184, 204];
-const PIN_RED: RGB = [228, 87, 46];
-const WHITE: RGB = [255, 255, 255];
+// ---- palette ----
+const NAVY_TOP: [number, number, number] = [10, 22, 51];
+const NAVY_BOTTOM: [number, number, number] = [6, 13, 31];
+const CARD_BG: [number, number, number] = [14, 30, 66];
+const GOLD: [number, number, number] = [212, 175, 105];
+const GOLD_DIM: [number, number, number] = [118, 100, 64];
+const CREAM: [number, number, number] = [240, 230, 205];
+const GRAY: [number, number, number] = [154, 167, 194];
+const RED: [number, number, number] = [198, 48, 48];
+const WHITE: [number, number, number] = [255, 255, 255];
 
-// ---------------------------------------------------------------- canvas
+// ---- the eight stories, all first reported Wednesday 25 November 2026 ----
+type Story = {
+  n: number;
+  headline: string;
+  sub1: string;
+  sub2: string;
+  lon: number;
+  lat: number;
+};
+
+const STORIES: Story[] = [
+  { n: 1, headline: "UKRAINE SINKS RUSSIAN SHIP", sub1: "Zelenskyy confirms strike", sub2: "Warship sunk off Benghazi", lon: 20.1, lat: 32.1 },
+  { n: 2, headline: "RIYADH TOWER STRUCK", sub1: "Houthi drone hits tallest tower", sub2: "Eleven people wounded", lon: 46.7, lat: 24.7 },
+  { n: 3, headline: "GIULIANI HONOURED", sub1: "Trump awards Medal of Freedom", sub2: "Ceremony at the White House", lon: -77, lat: 38.9 },
+  { n: 4, headline: "700,000 RUSSIAN DEAD", sub1: "New analysis of Ukraine war", sub2: "Nearly five years of fighting", lon: 30.5, lat: 50.4 },
+  { n: 5, headline: "ENGLAND LEVEL T20 SERIES", sub1: "Eight-wicket win in Hobart", sub2: "Chasing 185 against Australia", lon: 147.3, lat: -42.9 },
+  { n: 6, headline: "O'HARE FLIGHTS DELAYED", sub1: "Radar outage hits Chicago", sub2: "FAA warns of arrival halt", lon: -87.6, lat: 41.9 },
+  { n: 7, headline: "RADIO FOR AFGHAN GIRLS", sub1: "Lessons return to shortwave", sub2: "For girls barred from school", lon: 69.2, lat: 34.5 },
+  { n: 8, headline: "GAZA STRIKES KILL 7", sub1: "Senior Hamas official dead", sub2: "Medics report six others killed", lon: 34.5, lat: 31.5 },
+];
+
+// ---- 5x7 bitmap font, drawn as pictures ----
+// Each glyph is seven strings of five characters: "1" is ink, "0" is empty.
+// The first character of each row is the leftmost pixel.
+const FONT: Record<string, string[]> = {
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  C: ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  F: ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+  G: ["01110", "10001", "10000", "10111", "10001", "10001", "01111"],
+  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+  I: ["01110", "00100", "00100", "00100", "00100", "00100", "01110"],
+  J: ["00111", "00010", "00010", "00010", "00010", "10010", "01100"],
+  K: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  Q: ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  W: ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
+  X: ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+  Z: ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+  "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+  "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+  "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+  " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
+  ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
+  ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
+  "-": ["00000", "00000", "00000", "01110", "00000", "00000", "00000"],
+  "—": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+  "'": ["00100", "00100", "01000", "00000", "00000", "00000", "00000"],
+  "(": ["00010", "00100", "01000", "01000", "01000", "00100", "00010"],
+  ")": ["01000", "00100", "00010", "00010", "00010", "00100", "01000"],
+  "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100"],
+  "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
+  "/": ["00001", "00001", "00010", "00100", "01000", "10000", "10000"],
+  "%": ["11001", "11001", "00010", "00100", "01000", "10011", "10011"],
+  "+": ["00000", "00100", "00100", "11111", "00100", "00100", "00000"],
+  '"': ["01010", "01010", "01010", "00000", "00000", "00000", "00000"],
+  ":": ["00000", "00000", "01100", "00000", "00000", "01100", "00000"],
+  ";": ["00000", "00000", "01100", "00000", "01100", "00100", "01000"],
+};
+
+// ---- pixel canvas (RGBA, row-major) ----
 const px = Buffer.alloc(W * H * 4);
 
+type RGB = [number, number, number];
+
 function setPixel(x: number, y: number, c: RGB): void {
-  if (x < 0 || x >= W || y < 0 || y >= H) return;
+  if (x < 0 || y < 0 || x >= W || y >= H) return;
   const i = (y * W + x) * 4;
   px[i] = c[0];
   px[i + 1] = c[1];
@@ -38,14 +115,9 @@ function setPixel(x: number, y: number, c: RGB): void {
 }
 
 function fillRect(x: number, y: number, w: number, h: number, c: RGB): void {
-  for (let yy = y; yy < y + h; yy++) {
-    for (let xx = x; xx < x + w; xx++) setPixel(xx, yy, c);
+  for (let j = y; j < y + h; j++) {
+    for (let i = x; i < x + w; i++) setPixel(i, j, c);
   }
-}
-
-function hline(x0: number, x1: number, y: number, c: RGB): void {
-  if (x1 < x0) { const t = x0; x0 = x1; x1 = t; }
-  for (let x = x0; x <= x1; x++) setPixel(x, y, c);
 }
 
 function drawLine(x0: number, y0: number, x1: number, y1: number, c: RGB): void {
@@ -54,371 +126,381 @@ function drawLine(x0: number, y0: number, x1: number, y1: number, c: RGB): void 
   const sx = x0 < x1 ? 1 : -1;
   const sy = y0 < y1 ? 1 : -1;
   let err = dx + dy;
-  let x = x0;
-  let y = y0;
   for (;;) {
-    setPixel(x, y, c);
-    if (x === x1 && y === y1) break;
+    setPixel(x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
     const e2 = 2 * err;
-    if (e2 >= dy) { err += dy; x += sx; }
-    if (e2 <= dx) { err += dx; y += sy; }
+    if (e2 >= dy) {
+      err += dy;
+      x0 += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y0 += sy;
+    }
   }
 }
 
 function fillCircle(cx: number, cy: number, r: number, c: RGB): void {
-  for (let dy = -r; dy <= r; dy++) {
-    const dx = Math.floor(Math.sqrt(r * r - dy * dy));
-    hline(cx - dx, cx + dx, cy + dy, c);
-  }
-}
-
-// Midpoint circle outline (8-way symmetry).
-function circleOutline(cx: number, cy: number, r: number, c: RGB): void {
-  let x = r;
-  let y = 0;
-  let err = 0;
-  while (x >= y) {
-    setPixel(cx + x, cy + y, c); setPixel(cx + y, cy + x, c);
-    setPixel(cx - y, cy + x, c); setPixel(cx - x, cy + y, c);
-    setPixel(cx - x, cy - y, c); setPixel(cx - y, cy - x, c);
-    setPixel(cx + y, cy - x, c); setPixel(cx + x, cy - y, c);
-    y += 1;
-    err += 1 + 2 * y;
-    if (2 * (err - x) + 1 > 0) { x -= 1; err += 1 - 2 * x; }
-  }
-}
-
-type Pt = [number, number];
-
-function fillPolygon(pts: Pt[], c: RGB): void {
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const [, y] of pts) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
-  for (let y = Math.ceil(minY); y <= Math.floor(maxY); y++) {
-    const xs: number[] = [];
-    for (let i = 0; i < pts.length; i++) {
-      const [x1, y1] = pts[i];
-      const [x2, y2] = pts[(i + 1) % pts.length];
-      if ((y1 > y) !== (y2 > y)) {
-        xs.push(x1 + ((y - y1) * (x2 - x1)) / (y2 - y1));
-      }
-    }
-    xs.sort((a, b) => a - b);
-    for (let k = 0; k + 1 < xs.length; k += 2) {
-      hline(Math.ceil(xs[k]), Math.floor(xs[k + 1]), y, c);
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      if (x * x + y * y <= r * r) setPixel(cx + x, cy + y, c);
     }
   }
 }
 
-function strokePolygon(pts: Pt[], c: RGB): void {
-  for (let i = 0; i < pts.length; i++) {
-    const [x1, y1] = pts[i];
-    const [x2, y2] = pts[(i + 1) % pts.length];
-    drawLine(x1, y1, x2, y2, c);
+function ringCircle(cx: number, cy: number, r: number, c: RGB): void {
+  for (let a = 0; a < 360; a++) {
+    const t = (a * Math.PI) / 180;
+    setPixel(Math.round(cx + r * Math.cos(t)), Math.round(cy + r * Math.sin(t)), c);
   }
 }
 
-// ---------------------------------------------------------------- 5x7 font
-// Each glyph: 7 rows, each a 5-bit number (bit 4 = leftmost column).
-const FONT: Record<string, number[]> = {
-  A: [14, 17, 17, 31, 17, 17, 17],
-  B: [30, 17, 17, 30, 17, 17, 30],
-  C: [14, 17, 16, 16, 16, 17, 14],
-  D: [30, 17, 17, 17, 17, 17, 30],
-  E: [31, 16, 16, 30, 16, 16, 31],
-  F: [31, 16, 16, 30, 16, 16, 16],
-  G: [14, 17, 16, 23, 17, 17, 15],
-  H: [17, 17, 17, 31, 17, 17, 17],
-  I: [14, 4, 4, 4, 4, 4, 14],
-  J: [7, 2, 2, 2, 2, 18, 12],
-  K: [17, 18, 20, 24, 20, 18, 17],
-  L: [16, 16, 16, 16, 16, 16, 31],
-  M: [17, 27, 21, 21, 17, 17, 17],
-  N: [17, 25, 21, 19, 17, 17, 17],
-  O: [14, 17, 17, 17, 17, 17, 14],
-  P: [30, 17, 17, 30, 16, 16, 16],
-  Q: [14, 17, 17, 17, 21, 18, 13],
-  R: [30, 17, 17, 30, 20, 18, 17],
-  S: [15, 16, 16, 14, 1, 1, 30],
-  T: [31, 4, 4, 4, 4, 4, 4],
-  U: [17, 17, 17, 17, 17, 17, 14],
-  V: [17, 17, 17, 17, 17, 10, 4],
-  W: [17, 17, 17, 21, 21, 21, 10],
-  X: [17, 17, 10, 4, 10, 17, 17],
-  Y: [17, 17, 10, 4, 4, 4, 4],
-  Z: [31, 1, 2, 4, 8, 16, 31],
-  "0": [14, 17, 19, 21, 25, 17, 14],
-  "1": [4, 12, 4, 4, 4, 4, 14],
-  "2": [14, 17, 1, 6, 8, 16, 31],
-  "3": [31, 2, 4, 2, 1, 17, 14],
-  "4": [2, 6, 10, 18, 31, 2, 2],
-  "5": [31, 16, 30, 1, 1, 17, 14],
-  "6": [6, 8, 16, 30, 17, 17, 14],
-  "7": [31, 1, 2, 4, 8, 8, 8],
-  "8": [14, 17, 17, 14, 17, 17, 14],
-  "9": [14, 17, 17, 15, 1, 2, 12],
-  " ": [0, 0, 0, 0, 0, 0, 0],
-  ".": [0, 0, 0, 0, 0, 12, 12],
-  ",": [0, 0, 0, 0, 12, 4, 8],
-  ":": [0, 12, 12, 0, 12, 12, 0],
-  ";": [0, 12, 12, 0, 12, 4, 8],
-  "'": [4, 4, 8, 0, 0, 0, 0],
-  "-": [0, 0, 0, 14, 0, 0, 0],
-  "/": [1, 2, 2, 4, 8, 8, 16],
-  "(": [2, 4, 8, 8, 8, 4, 2],
-  ")": [8, 4, 2, 2, 2, 4, 8],
-  "&": [12, 18, 20, 8, 21, 18, 13],
-  "%": [25, 26, 2, 4, 8, 11, 19],
-  "+": [0, 4, 4, 31, 4, 4, 0],
-  "=": [0, 0, 31, 0, 31, 0, 0],
-  "?": [14, 17, 1, 2, 4, 0, 4],
-  "!": [4, 4, 4, 4, 4, 0, 4],
-  "$": [4, 15, 20, 14, 5, 30, 4],
-  "\u2022": [0, 0, 12, 12, 12, 0, 0],
-};
-
-function textWidth(s: string, scale: number): number {
-  return s.length * 6 * scale - scale;
+// ---- bitmap text ----
+function drawGlyph(ch: string, x: number, y: number, s: number, c: RGB): void {
+  const rows = FONT[ch] ?? FONT[" "];
+  for (let r = 0; r < rows.length; r++) {
+    const line = rows[r];
+    for (let col = 0; col < line.length; col++) {
+      if (line[col] === "1") fillRect(x + col * s, y + r * s, s, s, c);
+    }
+  }
 }
 
-function drawText(s: string, x: number, y: number, scale: number, c: RGB): void {
-  const up = s.toUpperCase();
+function drawText(str: string, x: number, y: number, s: number, c: RGB): void {
   let cx = x;
-  for (const ch of up) {
-    const glyph = FONT[ch] ?? FONT["?"];
-    for (let row = 0; row < 7; row++) {
-      const bits = glyph[row];
-      for (let col = 0; col < 5; col++) {
-        if (bits & (1 << (4 - col))) {
-          fillRect(cx + col * scale, y + row * scale, scale, scale, c);
-        }
-      }
-    }
-    cx += 6 * scale;
+  for (const ch of str) {
+    drawGlyph(ch.toUpperCase(), cx, y, s, c);
+    cx += 6 * s;
   }
 }
 
-function drawTextCentered(s: string, y: number, scale: number, c: RGB): void {
-  drawText(s, Math.round((W - textWidth(s, scale)) / 2), y, scale, c);
+function textWidth(str: string, s: number): number {
+  return str.length * 6 * s - s;
 }
 
-// ---------------------------------------------------------------- PNG encoder
-const CRC_TABLE: number[] = (() => {
-  const t: number[] = [];
+function drawTextCentered(str: string, cx: number, y: number, s: number, c: RGB): void {
+  drawText(str, cx - Math.floor(textWidth(str, s) / 2), y, s, c);
+}
+
+// ---- world map: equirectangular projection over the top half ----
+const MAP = { x: 24, y: 118, w: 976, h: 430 };
+
+function project(lon: number, lat: number): [number, number] {
+  const x = Math.round(MAP.x + ((lon + 180) / 360) * MAP.w);
+  const y = Math.round(MAP.y + ((90 - lat) / 180) * MAP.h);
+  return [x, y];
+}
+
+// Graticule: faint lines every 30 degrees, with the equator and the prime
+// meridian drawn a touch brighter so the eye finds its bearings.
+function drawGraticule(): void {
+  const meridians = [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150];
+  for (const lon of meridians) {
+    const [topX] = project(lon, 90);
+    const [botX] = project(lon, -90);
+    const shade = lon === 0 ? GOLD : GOLD_DIM;
+    drawLine(topX, MAP.y, botX, MAP.y + MAP.h, shade);
+  }
+  const parallels = [-60, -30, 0, 30, 60];
+  for (const lat of parallels) {
+    const [, rowY] = project(-180, lat);
+    const shade = lat === 0 ? GOLD : GOLD_DIM;
+    drawLine(MAP.x, rowY, MAP.x + MAP.w, rowY, shade);
+  }
+  // map frame
+  drawLine(MAP.x, MAP.y, MAP.x + MAP.w, MAP.y, GOLD);
+  drawLine(MAP.x, MAP.y + MAP.h, MAP.x + MAP.w, MAP.y + MAP.h, GOLD);
+  drawLine(MAP.x, MAP.y, MAP.x, MAP.y + MAP.h, GOLD);
+  drawLine(MAP.x + MAP.w, MAP.y, MAP.x + MAP.w, MAP.y + MAP.h, GOLD);
+}
+
+// Continent outlines, hand-plotted as (lon, lat) points. Coarse on purpose:
+// a stylised atlas, not a survey chart.
+const CONTINENTS: Array<Array<[number, number]>> = [
+  // North America
+  [
+    [-168, 66], [-150, 70], [-128, 70], [-110, 68], [-95, 68], [-85, 66],
+    [-80, 62], [-72, 62], [-65, 60], [-60, 55], [-55, 48], [-60, 44],
+    [-66, 43], [-70, 40], [-75, 37], [-76, 34], [-80, 31], [-81, 25],
+    [-85, 30], [-90, 29], [-94, 29], [-97, 26], [-97, 21], [-93, 17],
+    [-90, 14], [-86, 12], [-82, 9], [-79, 8], [-83, 10], [-88, 14],
+    [-92, 15], [-97, 16], [-102, 18], [-106, 22], [-111, 25], [-114, 29],
+    [-118, 33], [-122, 37], [-124, 42], [-124, 48], [-128, 51], [-132, 56],
+    [-140, 60], [-148, 60], [-156, 58], [-163, 58],
+  ],
+  // South America
+  [
+    [-79, 9], [-77, 4], [-80, -3], [-81, -6], [-78, -11], [-73, -17],
+    [-70, -22], [-70, -29], [-72, -36], [-73, -43], [-74, -49], [-70, -54],
+    [-66, -55], [-68, -50], [-65, -44], [-62, -39], [-58, -34], [-53, -33],
+    [-48, -28], [-42, -23], [-39, -17], [-35, -9], [-35, -6], [-39, -3],
+    [-44, -2], [-49, 0], [-52, 4], [-57, 6], [-61, 9], [-66, 11],
+    [-71, 12], [-76, 10],
+  ],
+  // Africa
+  [
+    [-6, 35], [-10, 31], [-15, 27], [-17, 21], [-17, 15], [-15, 11],
+    [-12, 8], [-8, 4], [-4, 5], [0, 6], [6, 4], [9, 4], [9, 0],
+    [12, -4], [13, -10], [12, -16], [14, -22], [16, -28], [19, -34],
+    [25, -34], [28, -32], [32, -28], [35, -24], [36, -20], [40, -15],
+    [40, -10], [42, -4], [46, -1], [51, 2], [51, 10], [48, 11],
+    [44, 11], [40, 15], [38, 18], [37, 22], [35, 27], [33, 31],
+    [30, 32], [24, 32], [19, 32], [14, 32], [10, 34], [10, 37],
+    [5, 37], [0, 36],
+  ],
+  // Eurasia, replotted: Atlantic coast, Arctic shore, Pacific rim, south coast
+  [
+    [-10, 37], [-9, 39], [-9, 43], [-4, 44], [-1, 46], [-2, 48],
+    [-4, 49], [0, 50], [2, 51], [4, 53], [7, 54], [8, 56],
+    [10, 57], [10, 59], [7, 60], [5, 61], [7, 63], [11, 65],
+    [14, 67], [18, 69], [23, 70], [28, 71], [32, 70], [36, 68],
+    [41, 68], [46, 68], [51, 69], [56, 68], [61, 69], [66, 70],
+    [71, 72], [76, 72], [81, 73], [86, 74], [91, 75], [96, 76],
+    [101, 76], [106, 76], [111, 74], [116, 73], [121, 73], [126, 72],
+    [131, 72], [136, 71], [141, 72], [146, 72], [151, 70], [156, 69],
+    [160, 69], [162, 67], [159, 63], [161, 60], [158, 57], [156, 53],
+    [152, 58], [145, 59], [141, 56], [139, 52], [136, 47], [133, 43],
+    [130, 42], [127, 39], [125, 38], [122, 37], [120, 34], [121, 30],
+    [119, 26], [115, 22], [110, 20], [108, 16], [106, 10], [104, 8],
+    [101, 6], [99, 8], [97, 12], [95, 16], [92, 21], [89, 22],
+    [86, 20], [83, 18], [80, 14], [77, 8], [75, 11], [73, 17],
+    [70, 21], [67, 24], [64, 25], [60, 25], [57, 26], [54, 26],
+    [52, 27], [50, 29], [48, 30], [50, 29], [53, 28], [56, 27],
+    [58, 24], [59, 22], [57, 19], [54, 17], [51, 15], [48, 14],
+    [44, 13], [42, 14], [40, 16], [38, 19], [36, 22], [35, 26],
+    [35, 29], [34, 31], [32, 34], [29, 36], [27, 37], [25, 38],
+    [23, 36], [21, 38], [19, 41], [17, 40], [14, 44], [12, 44],
+    [9, 44], [6, 43], [3, 42], [0, 39], [-2, 37], [-5, 36],
+  ],
+  // Australia, replotted with a tighter south coast
+  [
+    [114, -22], [113, -26], [115, -31], [115, -34], [118, -35], [122, -34],
+    [126, -32], [129, -32], [132, -32], [134, -33], [136, -35], [139, -37],
+    [142, -38], [146, -39], [149, -37], [151, -34], [153, -31], [153, -27],
+    [151, -24], [148, -20], [145, -17], [142, -14], [142, -11], [139, -13],
+    [136, -12], [134, -12], [132, -11], [130, -13], [127, -14], [124, -15],
+    [121, -17], [117, -20],
+  ],
+  // Greenland, replotted
+  [
+    [-44, 60], [-41, 63], [-36, 66], [-30, 68], [-25, 70], [-20, 71],
+    [-21, 74], [-26, 76], [-34, 76], [-42, 75], [-50, 74], [-54, 71],
+    [-54, 67], [-51, 63], [-47, 61],
+  ],
+  // Madagascar
+  [
+    [44, -16], [47, -15], [50, -16], [50, -20], [48, -23], [45, -25],
+    [44, -22], [43, -19], [44, -16],
+  ],
+  // Great Britain
+  [
+    [-5, 50], [-3, 53], [-5, 56], [-3, 58], [-1, 57], [0, 53],
+    [1, 51], [-2, 50],
+  ],
+  // Japan, a short island chain
+  [
+    [130, 31], [132, 33], [135, 34], [137, 35], [139, 37], [141, 39],
+    [141, 42], [143, 44], [141, 43], [140, 40], [138, 37], [135, 34],
+    [132, 33],
+  ],
+  // Borneo
+  [
+    [109, 1], [111, 3], [114, 4], [117, 6], [119, 2], [118, -1],
+    [116, -3], [113, -3], [110, -2],
+  ],
+  // Sumatra
+  [
+    [95, 5], [98, 3], [101, 0], [104, -3], [106, -6], [103, -5],
+    [100, -2], [97, 1], [95, 5],
+  ],
+  // New Guinea
+  [
+    [131, -1], [135, -2], [139, -3], [143, -5], [146, -6], [147, -9],
+    [144, -8], [141, -8], [137, -7], [134, -4],
+  ],
+];
+
+function drawContinents(): void {
+  for (const poly of CONTINENTS) {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const [x0, y0] = project(a[0], a[1]);
+      const [x1, y1] = project(b[0], b[1]);
+      drawLine(x0, y0, x1, y1, GOLD);
+    }
+  }
+}
+
+function drawPins(): void {
+  for (const s of STORIES) {
+    const [x, y] = project(s.lon, s.lat);
+    fillCircle(x, y, 11, RED);
+    ringCircle(x, y, 13, GOLD);
+    drawTextCentered(String(s.n), x, y - 4, 1, WHITE);
+  }
+}
+
+// ---- news cards: a two-by-four grid under the map ----
+// Each card carries a red numbered badge, a cream headline and two grey
+// sub-lines. Gold corner ticks mark the card edges.
+const CARD = { cols: 2, w: 480, h: 96, gapX: 16, gapY: 10, x: 24, y: 574 };
+
+function cardFrame(x: number, y: number): void {
+  const w = CARD.w;
+  const h = CARD.h;
+  drawLine(x, y, x + w - 1, y, GOLD_DIM);
+  drawLine(x, y + h - 1, x + w - 1, y + h - 1, GOLD_DIM);
+  drawLine(x, y, x, y + h - 1, GOLD_DIM);
+  drawLine(x + w - 1, y, x + w - 1, y + h - 1, GOLD_DIM);
+  // gold corner ticks, 12 px long, pointing in from each corner
+  const corners: Array<[number, number, number, number]> = [
+    [x, y, 1, 1],
+    [x + w - 1, y, -1, 1],
+    [x, y + h - 1, 1, -1],
+    [x + w - 1, y + h - 1, -1, -1],
+  ];
+  for (const [cx, cy, dx, dy] of corners) {
+    for (let k = 0; k < 12; k++) {
+      setPixel(cx + dx * k, cy, GOLD);
+      setPixel(cx, cy + dy * k, GOLD);
+    }
+  }
+}
+
+function drawCards(): void {
+  for (let i = 0; i < STORIES.length; i++) {
+    const s = STORIES[i];
+    const col = i % CARD.cols;
+    const row = Math.floor(i / CARD.cols);
+    const x = CARD.x + col * (CARD.w + CARD.gapX);
+    const y = CARD.y + row * (CARD.h + CARD.gapY);
+    fillRect(x, y, CARD.w, CARD.h, CARD_BG);
+    cardFrame(x, y);
+    const bx = x + 26;
+    const by = y + 26;
+    fillCircle(bx, by, 14, RED);
+    ringCircle(bx, by, 14, GOLD);
+    drawTextCentered(String(s.n), bx, by - 4, 1, WHITE);
+    const tx = x + 50;
+    drawText(s.headline, tx, y + 14, 2, CREAM);
+    drawText(s.sub1, tx, y + 44, 1, GRAY);
+    drawText(s.sub2, tx, y + 60, 1, GRAY);
+  }
+}
+
+// ---- hand-written PNG encoder: CRC32, chunks, zlib deflate ----
+// A PNG file is an 8-byte signature followed by chunks. Each chunk is
+// length + type + data + CRC32 of (type + data). We emit IHDR, one IDAT
+// holding the deflated scanlines, and IEND.
+
+function buildCrcTable(): number[] {
+  const table: number[] = new Array(256);
   for (let n = 0; n < 256; n++) {
     let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t.push(c >>> 0);
+    for (let k = 0; k < 8; k++) {
+      c = (c & 1) !== 0 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
   }
-  return t;
-})();
+  return table;
+}
 
-function crc32(b: Buffer): number {
+const CRC_TABLE = buildCrcTable();
+
+function crc32(buf: Buffer): number {
   let c = 0xffffffff;
-  for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xff] ^ (c >>> 8);
+  for (const byte of buf) {
+    c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  }
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function chunk(type: string, data: Buffer): Buffer {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length, 0);
-  const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(td), 0);
-  return Buffer.concat([len, td, crc]);
+function u32be(value: number): Buffer {
+  const b = Buffer.alloc(4);
+  b.writeUInt32BE(value >>> 0, 0);
+  return b;
 }
 
-function encodePNG(): Buffer {
-  const raw = Buffer.alloc(H * (1 + W * 4));
+function pngChunk(type: string, data: Buffer): Buffer {
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  return Buffer.concat([u32be(data.length), body, u32be(crc32(body))]);
+}
+
+function ihdrChunk(): Buffer {
+  const data = Buffer.alloc(13);
+  data.writeUInt32BE(W, 0);
+  data.writeUInt32BE(H, 4);
+  data[8] = 8; // 8 bits per channel
+  data[9] = 6; // colour type 6 = RGBA
+  data[10] = 0; // compression: deflate
+  data[11] = 0; // filter method: adaptive, we use 0 on every row
+  data[12] = 0; // no interlace
+  return pngChunk("IHDR", data);
+}
+
+function scanlines(): Buffer {
+  // One filter byte (0 = none) in front of every row of RGBA pixels.
+  const stride = W * 4;
+  const raw = Buffer.alloc(H * (stride + 1));
   for (let y = 0; y < H; y++) {
-    raw[y * (1 + W * 4)] = 0; // filter: none
-    px.copy(raw, y * (1 + W * 4) + 1, y * W * 4, (y + 1) * W * 4);
+    const at = y * (stride + 1);
+    raw[at] = 0;
+    px.copy(raw, at + 1, y * stride, (y + 1) * stride);
   }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(W, 0);
-  ihdr.writeUInt32BE(H, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // colour type RGBA
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
-  const idat = deflateSync(raw, { level: 9 });
+  return raw;
+}
+
+function encodePng(): Buffer {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const compressed = deflateSync(scanlines(), { level: 9 });
   return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", idat),
-    chunk("IEND", Buffer.alloc(0)),
+    signature,
+    ihdrChunk(),
+    pngChunk("IDAT", compressed),
+    pngChunk("IEND", Buffer.alloc(0)),
   ]);
 }
 
-// ---------------------------------------------------------------- background
-for (let y = 0; y < H; y++) {
-  const t = y / (H - 1);
-  const c: RGB = [
-    Math.round(NAVY_TOP[0] + (NAVY_BOT[0] - NAVY_TOP[0]) * t),
-    Math.round(NAVY_TOP[1] + (NAVY_BOT[1] - NAVY_TOP[1]) * t),
-    Math.round(NAVY_TOP[2] + (NAVY_BOT[2] - NAVY_TOP[2]) * t),
-  ];
-  for (let x = 0; x < W; x++) setPixel(x, y, c);
+// ---- compose the whole poster ----
+function main(): void {
+  for (let y = 0; y < H; y++) {
+    const t = y / (H - 1);
+    const c: RGB = [
+      Math.round(NAVY_TOP[0] + (NAVY_BOTTOM[0] - NAVY_TOP[0]) * t),
+      Math.round(NAVY_TOP[1] + (NAVY_BOTTOM[1] - NAVY_TOP[1]) * t),
+      Math.round(NAVY_TOP[2] + (NAVY_BOTTOM[2] - NAVY_TOP[2]) * t),
+    ];
+    fillRect(0, y, W, 1, c);
+  }
+
+  // gold frame
+  drawLine(10, 10, 1013, 10, GOLD);
+  drawLine(10, 1013, 1013, 1013, GOLD);
+  drawLine(10, 10, 10, 1013, GOLD);
+  drawLine(1013, 10, 1013, 1013, GOLD);
+
+  // title block
+  drawTextCentered("THE WORLD IN ONE DAY", 512, 28, 4, GOLD);
+  drawTextCentered("25 NOVEMBER 2026", 512, 72, 2, CREAM);
+  drawLine(312, 102, 712, 102, GOLD);
+
+  // map + pins
+  drawGraticule();
+  drawContinents();
+  drawPins();
+  drawTextCentered("EIGHT STORIES — ONE DAY — 25 NOVEMBER 2026", 512, 554, 1, GRAY);
+
+  // cards + footer
+  drawCards();
+  drawTextCentered("25 NOVEMBER 2026 — THE WORLD IN ONE DAY", 512, 998, 1, GRAY);
+
+  const outDir = process.env.MAKEFUN_OUTPUT_DIR || "/output";
+  mkdirSync(outDir, { recursive: true });
+  const out = join(outDir, "entry.png");
+  writeFileSync(out, encodePng());
+  console.log(`wrote ${out} (${W}x${H})`);
 }
 
-// Gold rules, top and bottom.
-fillRect(24, 20, 976, 3, GOLD);
-fillRect(24, 1006, 976, 3, GOLD);
-
-// ---------------------------------------------------------------- header
-drawTextCentered("THE WORLD IN ONE DAY", 32, 2, GOLD);
-drawTextCentered("25 NOVEMBER 2026", 56, 6, CREAM);
-drawTextCentered("WEDNESDAY - EIGHT STORIES THAT DEFINED THE DAY", 116, 2, MUTED);
-
-// ---------------------------------------------------------------- map
-const MAP_X0 = 24;
-const MAP_Y0 = 138;
-const MAP_X1 = 1000;
-const MAP_Y1 = 528;
-const MAP_W = MAP_X1 - MAP_X0;
-const MAP_H = MAP_Y1 - MAP_Y0;
-
-function project(lon: number, lat: number): Pt {
-  return [
-    Math.round(MAP_X0 + ((lon + 180) / 360) * MAP_W),
-    Math.round(MAP_Y0 + ((75 - lat) / 135) * MAP_H),
-  ];
-}
-
-fillRect(MAP_X0, MAP_Y0, MAP_W, MAP_H, PANEL);
-// Frame border (2px panel edge).
-fillRect(MAP_X0, MAP_Y0, MAP_W, 2, PANEL_EDGE);
-fillRect(MAP_X0, MAP_Y1 - 2, MAP_W, 2, PANEL_EDGE);
-fillRect(MAP_X0, MAP_Y0, 2, MAP_H, PANEL_EDGE);
-fillRect(MAP_X1 - 2, MAP_Y0, 2, MAP_H, PANEL_EDGE);
-
-// Graticule every 30 degrees.
-for (let lon = -150; lon <= 150; lon += 30) {
-  const [x] = project(lon, 0);
-  drawLine(x, MAP_Y0 + 2, x, MAP_Y1 - 2, GRATICULE);
-}
-for (let lat = -60; lat <= 60; lat += 30) {
-  const [, y] = project(0, lat);
-  drawLine(MAP_X0 + 2, y, MAP_X1 - 2, y, GRATICULE);
-}
-
-// Continents (simplified, recognisable approximations, lon/lat pairs).
-const CONTINENTS: Array<Array<[number, number]>> = [
-  // North America
-  [[-168, 66], [-165, 60], [-158, 58], [-152, 60], [-140, 60], [-135, 58], [-130, 54], [-125, 49], [-124, 42], [-120, 34], [-114, 29], [-110, 24], [-105, 20], [-97, 16], [-94, 17], [-90, 14], [-86, 12], [-83, 9], [-80, 8], [-77, 7], [-79, 9], [-81, 13], [-84, 16], [-87, 21], [-90, 21], [-91, 19], [-97, 26], [-93, 30], [-89, 30], [-84, 30], [-81, 26], [-80, 32], [-76, 35], [-74, 40], [-70, 42], [-68, 44], [-66, 45], [-60, 47], [-55, 47], [-60, 52], [-65, 58], [-68, 55], [-78, 62], [-85, 66], [-92, 66], [-95, 69], [-110, 68], [-125, 70], [-140, 70], [-155, 71], [-165, 68]],
-  // Greenland
-  [[-58, 64], [-52, 60], [-43, 60], [-40, 64], [-32, 68], [-25, 70], [-20, 74], [-22, 76], [-30, 78], [-45, 80], [-58, 76], [-62, 74], [-58, 70], [-55, 66]],
-  // South America
-  [[-77, 7], [-72, 11], [-64, 10], [-60, 8], [-52, 5], [-50, 0], [-44, -3], [-35, -8], [-39, -15], [-41, -23], [-48, -28], [-52, -33], [-58, -38], [-62, -41], [-65, -45], [-68, -50], [-70, -54], [-73, -50], [-73, -44], [-72, -37], [-71, -30], [-70, -22], [-70, -18], [-77, -12], [-81, -6], [-80, 0], [-79, 4]],
-  // Africa
-  [[-17, 15], [-16, 20], [-13, 27], [-9, 31], [-5, 35], [0, 36], [10, 37], [11, 34], [19, 32], [25, 32], [30, 31], [33, 27], [35, 28], [37, 22], [39, 18], [43, 12], [48, 11], [51, 10], [46, 5], [41, 0], [40, -5], [40, -10], [36, -18], [33, -26], [28, -33], [20, -35], [17, -32], [15, -27], [12, -18], [13, -12], [12, -6], [9, -1], [9, 4], [-8, 4], [-13, 8], [-17, 12]],
-  // Eurasia
-  [[-9, 37], [-9, 43], [-2, 44], [-1, 46], [-4, 48], [-1, 50], [3, 51], [5, 53], [8, 57], [10, 59], [5, 60], [5, 62], [12, 64], [18, 66], [25, 70], [32, 70], [40, 68], [44, 68], [55, 69], [68, 73], [75, 73], [80, 73], [95, 76], [105, 77], [110, 74], [115, 73], [125, 71], [135, 72], [145, 72], [155, 70], [162, 66], [170, 66], [178, 65], [178, 62], [170, 60], [162, 60], [158, 56], [156, 52], [150, 59], [142, 55], [140, 50], [138, 46], [135, 43], [130, 42], [127, 40], [122, 38], [120, 35], [122, 32], [120, 28], [110, 21], [108, 18], [105, 10], [103, 7], [100, 7], [98, 10], [95, 15], [92, 21], [88, 22], [85, 19], [80, 15], [77, 8], [74, 20], [70, 23], [66, 25], [62, 25], [57, 26], [54, 26], [52, 28], [50, 30], [48, 30], [44, 29], [43, 27], [40, 22], [38, 20], [35, 28], [34, 31], [36, 36], [30, 36], [27, 37], [23, 36], [22, 37], [19, 42], [15, 44], [12, 44], [8, 44], [3, 43], [0, 40], [-2, 37], [-6, 36], [-9, 37]],
-  // UK
-  [[-5, 50], [-3, 53], [-5, 56], [-3, 58], [-1, 57], [0, 53], [1, 51], [-3, 50]],
-  // Japan
-  [[129, 31], [130, 33], [132, 33], [135, 34], [137, 35], [139, 35], [140, 38], [141, 41], [142, 44], [144, 44], [141, 39], [139, 37], [136, 35], [133, 33]],
-  // Indonesia
-  [[95, 5], [98, 3], [100, 0], [102, -2], [104, -3], [106, -6], [108, -7], [110, -7], [112, -7], [114, -8], [116, -9], [119, -9], [120, -10], [122, -9], [124, -10], [126, -8], [128, -6], [130, -4], [131, -2], [133, -1], [136, -2], [138, -3], [140, -4], [141, -2], [141, 0], [138, 1], [135, 0], [132, 0], [130, 1], [128, 1], [126, 1], [124, 1], [122, 1], [120, 1], [118, 0], [116, 0], [114, 0], [112, -1], [110, 0], [108, 0], [106, 0], [104, 1], [102, 2], [100, 3], [98, 4], [96, 5]],
-  // New Guinea
-  [[131, -1], [134, -2], [136, -2], [138, -3], [140, -4], [142, -5], [145, -6], [147, -6], [150, -8], [148, -9], [146, -8], [143, -8], [141, -8], [138, -7], [136, -5], [134, -3], [132, -1]],
-  // Madagascar
-  [[44, -16], [47, -15], [50, -16], [49, -20], [46, -24], [44, -25], [43, -22], [44, -18]],
-  // Australia
-  [[114, -22], [114, -30], [115, -33], [118, -35], [124, -33], [129, -32], [132, -32], [135, -35], [138, -35], [140, -38], [145, -38], [150, -37], [153, -32], [153, -27], [150, -23], [146, -19], [142, -15], [142, -11], [140, -17], [136, -15], [135, -12], [132, -11], [130, -13], [126, -14], [122, -17], [118, -20]],
-  // New Zealand
-  [[165, -46], [167, -45], [170, -43], [173, -41], [175, -38], [177, -38], [175, -40], [173, -42], [170, -44], [167, -47]],
-];
-
-for (const cont of CONTINENTS) {
-  // Clamp projected points inside the frame: the map only shows lat <= 75,
-  // so far-north points (Siberia, Greenland) would otherwise overpaint the
-  // frame's top border. Clamping keeps every land edge inside the panel.
-  const pts = cont.map(([lon, lat]) => {
-    const [x, y] = project(lon, lat);
-    return [
-      Math.min(Math.max(x, MAP_X0 + 2), MAP_X1 - 2),
-      Math.min(Math.max(y, MAP_Y0 + 2), MAP_Y1 - 2),
-    ] as Pt;
-  });
-  fillPolygon(pts, LAND);
-  strokePolygon(pts, LAND_EDGE);
-}
-
-// Compass: gold "N" with an arrow, top-right inside the map frame.
-{
-  const cx = 968;
-  const top = 152;
-  drawText("N", cx - 5, top, 2, GOLD);
-  const ay = top + 16;
-  fillPolygon([[cx, ay], [cx - 6, ay + 14], [cx + 6, ay + 14]], GOLD);
-}
-
-// Map captions, bottom inside the frame.
-drawText("EVERY PIN IS A STORY BELOW", MAP_X0 + 8, MAP_Y1 - 18, 1, MUTED);
-{
-  const cap = "ATLAS OF ONE DAY";
-  drawText(cap, MAP_X1 - 8 - textWidth(cap, 1), MAP_Y1 - 18, 1, MUTED);
-}
-
-// ---------------------------------------------------------------- stories
-// All eight stories were first reported on Wednesday 25 November 2026.
-type Story = { head: string; sub1: string; sub2: string; pin: [number, number] };
-const STORIES: Story[] = [
-  { head: "UKRAINE SINKS SHIP", sub1: "ZELENSKYY CONFIRMS STRIKE", sub2: "WARSHIP SUNK OFF BENGHAZI", pin: [20.1, 32.1] },
-  { head: "RIYADH TOWER STRUCK", sub1: "HOUTHI DRONE HITS TALLEST TOWER", sub2: "11 WOUNDED IN RIYADH", pin: [46.7, 24.7] },
-  { head: "GIULIANI HONOURED", sub1: "TRUMP AWARDS MEDAL OF FREEDOM", sub2: "TOP CIVIL HONOUR IN WASHINGTON", pin: [-77, 38.9] },
-  { head: "700,000 RUSSIAN DEAD", sub1: "NEW ANALYSIS OF UKRAINE WAR", sub2: "NEARLY FIVE YEARS OF FIGHTING", pin: [30.5, 50.4] },
-  { head: "ENGLAND LEVEL SERIES", sub1: "BEAT AUSTRALIA BY 8 WICKETS", sub2: "CHASING 185 IN HOBART", pin: [147.3, -42.9] },
-  { head: "O'HARE FLIGHTS DELAYED", sub1: "RADAR OUTAGE HITS CHICAGO", sub2: "FAA WARNS OF ARRIVAL HALT", pin: [-87.6, 41.9] },
-  { head: "RADIO FOR AFGHAN GIRLS", sub1: "RFE/RL BACK ON SHORTWAVE", sub2: "SCHOOL LESSONS BY RADIO", pin: [69.2, 34.5] },
-  { head: "GAZA STRIKES KILL 7", sub1: "HAMAS OFFICIAL KILLED", sub2: "SIX OTHERS KILLED, MEDICS SAY", pin: [34.5, 31.5] },
-];
-
-// Pins first (they sit on the map, above the continents).
-STORIES.forEach((s, i) => {
-  const [cx, cy] = project(s.pin[0], s.pin[1]);
-  fillCircle(cx, cy, 14, PIN_RED);
-  circleOutline(cx, cy, 14, WHITE);
-  circleOutline(cx, cy, 17, PIN_RED);
-  const num = String(i + 1);
-  drawText(num, cx - Math.round(textWidth(num, 2) / 2), cy - 7, 2, WHITE);
-});
-
-// Story cards: 2 columns x 4 rows.
-const CARD_W = 472;
-const CARD_H = 100;
-const GAP = 12;
-STORIES.forEach((s, i) => {
-  const col = i % 2;
-  const row = Math.floor(i / 2);
-  const x = 24 + col * (CARD_W + GAP);
-  const y = 544 + row * (CARD_H + GAP);
-  fillRect(x, y, CARD_W, CARD_H, PANEL);
-  fillRect(x, y, CARD_W, 3, GOLD);
-  // Number badge.
-  fillRect(x + 14, y + 14, 36, 36, PIN_RED);
-  const num = String(i + 1);
-  drawText(
-    num,
-    x + 14 + Math.round((36 - textWidth(num, 3)) / 2),
-    y + 14 + Math.round((36 - 7 * 3) / 2),
-    3,
-    WHITE,
-  );
-  // Headline + sub-lines.
-  drawText(s.head, x + 62, y + 14, 3, CREAM);
-  drawText(s.sub1, x + 62, y + 46, 2, MUTED);
-  drawText(s.sub2, x + 62, y + 70, 2, MUTED);
-});
-
-// ---------------------------------------------------------------- footer
-// Repeat the date in the footer: the judge's first criterion is that the
-// image names the day it sums up, so the date appears twice (header + footer).
-drawTextCentered("WEDNESDAY 25 NOVEMBER 2026 - MAKE.FUN", 990, 1, MUTED);
-
-// ---------------------------------------------------------------- output
-const outDir = process.env.MAKEFUN_OUTPUT_DIR || "/output";
-mkdirSync(outDir, { recursive: true });
-writeFileSync(join(outDir, "entry.png"), encodePNG());
+main();

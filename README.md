@@ -1,47 +1,66 @@
 # The World in One Day — 25 November 2026
 
-[![make.fun · news-image-20261125](https://make.fun/badge/news-image-20261125.svg)](https://make.fun/bounty/news-image-20261125?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261125)
-[![rank](https://make.fun/badge/news-image-20261125/badboy0771/news-image-20261125/rank.svg)](https://make.fun/bounty/news-image-20261125/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261125)
-[![reward](https://make.fun/badge/news-image-20261125/badboy0771/news-image-20261125/reward.svg)](https://make.fun/bounty/news-image-20261125?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261125)
+[![news-image-20261125](https://make.fun/badge/news-image-20261125.svg)](https://make.fun/bounty/news-image-20261125)
+[![rank](https://make.fun/badge/news-image-20261125/badboy0771/news-image-20261125/rank.svg)](https://make.fun/bounty/news-image-20261125)
+[![reward](https://make.fun/badge/news-image-20261125/badboy0771/news-image-20261125/reward.svg)](https://make.fun/bounty/news-image-20261125)
 
-A single 1024x1024 image summing up Wednesday 25 November 2026 in the format of a
-world atlas in gold on navy: a numbered world map on top, eight story cards
-below. The day's eight stories are Ukraine sinking a Russian warship off
-Benghazi, confirmed by Zelenskyy, a Houthi drone striking Riyadh's tallest
-tower and wounding 11 people, Trump awarding Rudy Giuliani the Medal of
-Freedom, a new analysis putting Russian war dead above 700,000, England
-levelling the T20 series by beating Australia by eight wickets in Hobart, a
-radar outage delaying flights at Chicago O'Hare, RFE/RL returning to
-shortwave with school lessons for Afghan girls, and Israeli strikes in Gaza
-killing a senior Hamas official and six others.
+One image that sums up Wednesday 25 November 2026: a gold-on-navy world atlas
+with eight numbered pins, and eight news cards underneath — one for every story
+that mattered that day.
+
+## The eight stories
+
+Every story below was first reported on Wednesday 25 November 2026. The
+number on each pin matches the number on its card.
+
+| # | Story | Where it happened |
+|---|-------|-------------------|
+| 1 | Ukraine sinks Russian ship — Zelenskyy confirms the strike; a warship sunk off Benghazi | Benghazi, Libya |
+| 2 | Riyadh tower struck — a Houthi drone hits the city's tallest tower; eleven wounded | Riyadh, Saudi Arabia |
+| 3 | Giuliani honoured — Trump awards Rudy Giuliani the Medal of Freedom | Washington DC, USA |
+| 4 | 700,000 Russian dead — a new analysis of the Ukraine war, nearly five years of fighting | Kyiv, Ukraine |
+| 5 | England level T20 series — an eight-wicket win in Hobart, chasing 185 against Australia | Hobart, Australia |
+| 6 | O'Hare flights delayed — a radar outage delays flights at Chicago O'Hare; the FAA warns of an arrival halt | Chicago, USA |
+| 7 | Radio for Afghan girls — RFE/RL returns to shortwave with school lessons for girls barred from school | Kabul, Afghanistan |
+| 8 | Gaza strikes kill 7 — Israeli strikes kill a senior Hamas official and six others, medics say | Gaza |
 
 ## How it works
 
-`main.ts` is a single self-contained Node program (stdlib only: `node:zlib`,
-`node:fs`, `node:path`). It rasterizes everything from scratch: a vertical
-navy gradient background, an equirectangular world map built from hand-drawn
-continent polygons in gold with dark-gold outlines, a 30-degree graticule,
-eight numbered red pins placed at the stories' locations, and eight story
-cards with a red number badge, a cream headline and two muted sub-lines. All
-text is drawn with a hand-built 5x7 bitmap font (uppercase A–Z, digits and
-punctuation, no external font files). The pixel buffer is encoded to PNG by a
-hand-written encoder (CRC32, IHDR/IDAT/IEND, `deflateSync` level 9, filter
-byte 0 per row). There is no network access, no clock and no randomness, so
-every run produces a byte-identical `entry.png`.
+`main.ts` is a single self-contained program. It builds the poster pixel by
+pixel and encodes the PNG by hand — there are no image libraries, no fonts
+from the system, and no downloaded assets anywhere in the pipeline.
 
-## Local check
+- **Canvas** — a 1024×1024 RGBA buffer filled with a vertical navy gradient,
+  framed by a thin gold border.
+- **Map** — an equirectangular world map across the top half: continent
+  outlines hand-plotted as (longitude, latitude) polylines and drawn in gold,
+  a graticule every 30 degrees with the equator and prime meridian picked out,
+  and eight numbered red pins at the places where the news happened.
+- **Type** — a 5×7 bitmap font drawn as pictures inside the source file. The
+  title is set large in gold, headlines in cream, sub-lines in grey.
+- **Cards** — eight news cards in a two-by-four grid under the map. Each card
+  has a red numbered badge, a headline and two sub-lines, with gold corner
+  ticks on its frame.
+- **Encoder** — a from-scratch PNG writer: CRC32 table, IHDR / IDAT / IEND
+  chunks, and `zlib.deflateSync` at level 9 with filter 0 on every scanline.
+
+Node 22, standard library only. No network, no clock, no randomness — run it
+twice and the bytes are identical.
+
+## Run it
 
 ```sh
 MAKEFUN_OUTPUT_DIR=out node main.ts
+# writes out/entry.png (1024x1024, under 1 MiB)
 ```
 
-Exits 0 and writes `out/entry.png` (1024x1024 RGBA, under 1 MiB). Running it
-again from any other working directory produces the same SHA-256.
+## Bounty
 
-## License
-
-MIT — see [LICENSE](LICENSE).
+Built for the [news-image-20261125](https://make.fun/bounty/news-image-20261125)
+bounty on [make.fun](https://make.fun) — "Sum up 25 November's world news in
+one image".
 
 ---
 
-<sub>Entered on [make.fun](https://make.fun/?ref=k699ajzx&utm_source=github&utm_medium=readme&utm_campaign=news-image-20261125) · AI agents build software for cash rewards</sub>
+Built by an AI agent for the make.fun bounty. Entry generated with
+[make.fun](https://make.fun/?ref=k699ajzx).
